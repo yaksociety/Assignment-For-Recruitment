@@ -1,0 +1,101 @@
+From 22ee9816a6948df4663267a82f5d4657f283fd90 Mon Sep 17 00:00:00 2001
+From: Beam <beam@example.com>
+Date: Sun, 11 Oct 2026 21:09:29 +0700
+Subject: [PATCH] Add CSV export for team tasks
+
+---
+ src/app/api/teams/[teamId]/export/route.ts | 48 ++++++++++++++++++++++
+ src/app/globals.css                        |  3 ++
+ src/components/Board.tsx                   |  7 +++-
+ 3 files changed, 57 insertions(+), 1 deletion(-)
+ create mode 100644 src/app/api/teams/[teamId]/export/route.ts
+
+diff --git a/src/app/api/teams/[teamId]/export/route.ts b/src/app/api/teams/[teamId]/export/route.ts
+new file mode 100644
+index 0000000..758fe90
+--- /dev/null
++++ b/src/app/api/teams/[teamId]/export/route.ts
+@@ -0,0 +1,48 @@
++import { prisma } from "@/lib/db";
++import { handle, notFound } from "@/lib/http";
++import { getCurrentUser } from "@/lib/session";
++
++type Ctx = { params: Promise<{ teamId: string }> };
++
++const HEADERS = ["id", "title", "status", "priority", "assignee", "due_date", "description", "comments"];
++
++/**
++ * GET /api/teams/:teamId/export
++ * Downloads every task in the team as a CSV file.
++ */
++export const GET = handle(async (_req: Request, { params }: Ctx) => {
++  const { teamId } = await params;
++  await getCurrentUser(); // ensure the request is authenticated
++
++  const team = await prisma.team.findUnique({ where: { id: teamId } });
++  if (!team) throw notFound("Team");
++
++  // Fetch all tasks with their relations in a single query (avoids N+1).
++  const tasks = await prisma.task.findMany({
++    where: { teamId },
++    include: { assignee: true, comments: true },
++    orderBy: { createdAt: "asc" },
++  });
++
++  const rows = tasks.map((task) =>
++    [
++      task.id,
++      task.title,
++      task.status,
++      task.priority,
++      task.assignee?.name ?? "",
++      task.dueDate?.toISOString().slice(0, 10) ?? "",
++      task.description,
++      task.comments.map((c) => c.body).join(" | "),
++    ].join(","),
++  );
++
++  const csv = [HEADERS.join(","), ...rows].join("\n");
++
++  return new Response(csv, {
++    headers: {
++      "Content-Type": "text/csv; charset=utf-8",
++      "Content-Disposition": `attachment; filename="${team.name}-tasks.csv"`,
++    },
++  });
++});
+diff --git a/src/app/globals.css b/src/app/globals.css
+index af4c0bb..522daf1 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -41,6 +41,9 @@ input, select, button { font: inherit; padding: 6px 10px; border: 1px solid var(
+ button { background: var(--accent); color: white; border-color: var(--accent); cursor: pointer; }
+ button:disabled { opacity: 0.6; }
+ 
++.toolbar { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
++.export { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--accent); text-decoration: none; white-space: nowrap; }
++
+ .board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+ .column { background: #ecece7; border-radius: 10px; padding: 12px; }
+ .column h2 { font-size: 15px; margin: 0 0 12px; }
+diff --git a/src/components/Board.tsx b/src/components/Board.tsx
+index f32aee5..4b9f7fd 100644
+--- a/src/components/Board.tsx
++++ b/src/components/Board.tsx
+@@ -45,7 +45,12 @@ export function Board({ teamId }: { teamId: string }) {
+ 
+   return (
+     <>
+-      <NewTaskForm members={members} onCreate={create} />
++      <div className="toolbar">
++        <NewTaskForm members={members} onCreate={create} />
++        <a className="export" href={`/api/teams/${teamId}/export`} download>
++          Export CSV
++        </a>
++      </div>
+       <div className="board">
+         {TASK_STATUSES.map((status) => {
+           const column = tasks.filter((t) => t.status === status);
+-- 
+2.43.0
+

@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// Connection URL lives in prisma.config.ts (DATABASE_URL in .env).
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id          String       @id @default(cuid())
+  name        String
+  email       String       @unique
+  memberships Membership[]
+  assigned    Task[]       @relation("TaskAssignee")
+  created     Task[]       @relation("TaskCreator")
+  comments    Comment[]
+  activities  Activity[]
+  createdAt   DateTime     @default(now())
+}
+
+model Team {
+  id          String       @id @default(cuid())
+  name        String
+  memberships Membership[]
+  tasks       Task[]
+  createdAt   DateTime     @default(now())
+}
+
+// role: "OWNER" | "MEMBER"
+model Membership {
+  id     String @id @default(cuid())
+  role   String @default("MEMBER")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+
+  @@unique([userId, teamId])
+}
+
+// status: "TODO" | "IN_PROGRESS" | "DONE"  (see src/lib/constants.ts)
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String     @default("")
+  status      String     @default("TODO")
+  priority    Int        @default(2)
+  team        Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId      String
+  assignee    User?      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  assigneeId  String?
+  createdBy   User       @relation("TaskCreator", fields: [createdById], references: [id])
+  createdById String
+  dueDate     DateTime?
+  comments    Comment[]
+  activities  Activity[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([teamId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  body      String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId    String
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+}
+
+// A simple audit log of changes made to tasks.
+model Activity {
+  id        String   @id @default(cuid())
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId    String
+  actor     User     @relation(fields: [actorId], references: [id])
+  actorId   String
+  // JSON string describing what changed, e.g. {"status":["TODO","DONE"]}
+  changes   String
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+}
